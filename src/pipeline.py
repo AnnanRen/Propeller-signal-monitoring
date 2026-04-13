@@ -13,6 +13,7 @@ from .azimuth import (
     compute_confidence_map,
 )
 from .data_io import SACBundle, find_sac_bundles, load_bundle
+from .preprocess import preprocess_signals
 from .segment import crop_signals_by_time
 from .spectral import SpectralParams, compute_stft, lofar_from_spectrogram, power_db, suggest_frequency_bands
 
@@ -24,6 +25,12 @@ class PipelineParams:
     overlap: float = 0.5
     selected_band: Tuple[float, float] | None = None
     time_slice_s: Tuple[float, float] | None = None
+    enable_demean: bool = True
+    enable_detrend: bool = True
+    enable_bandpass: bool = True
+    preprocess_band: Tuple[float, float] | None = None
+    apply_orientation: bool = True
+    orientation_deg: float = 0.0
     stability_window: int = 15
     stability_step: int = 5
     confidence_threshold: float = 0.6
@@ -46,6 +53,17 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
             start_s=params.time_slice_s[0],
             end_s=params.time_slice_s[1],
         )
+
+    signals, preprocess_report = preprocess_signals(
+        signals=signals,
+        fs=fs,
+        enable_demean=params.enable_demean,
+        enable_detrend=params.enable_detrend,
+        enable_bandpass=params.enable_bandpass,
+        preprocess_band=params.preprocess_band,
+        apply_orientation=params.apply_orientation,
+        orientation_deg=params.orientation_deg,
+    )
 
     spec_params = SpectralParams(window_length_s=params.window_length_s, overlap=params.overlap)
 
@@ -119,6 +137,7 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
         "selected_band": (float(freq_min), float(freq_max)),
         "time_slice_s": params.time_slice_s,
         "crop_info": crop_info,
+        "preprocess_report": preprocess_report,
     }
 
 

@@ -3,6 +3,12 @@ window_length_s: 2.0
 overlap: 0.5
 selected_band: null
 time_slice_s: null
+enable_demean: true
+enable_detrend: true
+enable_bandpass: true
+preprocess_band: null
+apply_orientation: true
+orientation_deg: 0.0
 stability_window: 15
 stability_step: 5
 confidence_threshold: 0.6

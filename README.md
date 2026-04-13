@@ -6,6 +6,7 @@
 - `notebooks/run.ipynb`: optional notebook entrypoint
 - `src/data_io.py`: SAC discovery and reading
 - `src/spectral.py`: STFT, LOFAR normalization, automatic frequency-band suggestion
+- `src/preprocess.py`: optional de-mean, de-trend, bandpass, and horizontal orientation correction
 - `src/segment.py`: time-slice cropping for focused analysis
 - `src/azimuth.py`: azimuth map, stability (R), confidence mask
 - `src/plotting.py`: independent plotting modules
@@ -32,4 +33,5 @@ python run.py
 - Plots support both PNG and PDF outputs.
 - The notebook controls which modules to render and save.
 - Use `PipelineParams(time_slice_s=(start_s, end_s))` to analyze only an interested segment.
+- Preprocess defaults are enabled: de-mean, de-trend, bandpass (`2 Hz` to `0.8 * Nyquist`), orientation correction (`0 deg` by default).
 - Table outputs, feature extraction, truth-based validation, batch processing, and GUI are tracked as TODOs.
