@@ -1,0 +1,8 @@
+data_dir: .
+window_length_s: 2.0
+overlap: 0.5
+selected_band: null
+time_slice_s: null
+stability_window: 15
+stability_step: 5
+confidence_threshold: 0.6
