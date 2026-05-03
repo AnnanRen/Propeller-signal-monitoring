@@ -1,37 +1,45 @@
-# SAC Azimuth Spectral Analysis
+# 数据处理项目（Streamlit UI）
 
-## Project layout
-
-- `run.py`: notebook-style entrypoint with `# %%` cells (parameter tuning + module calls only)
-- `notebooks/run.ipynb`: optional notebook entrypoint
-- `src/data_io.py`: SAC discovery and reading
-- `src/spectral.py`: STFT, LOFAR normalization, automatic frequency-band suggestion
-- `src/preprocess.py`: optional de-mean, de-trend, bandpass, and horizontal orientation correction
-- `src/segment.py`: time-slice cropping for focused analysis
-- `src/azimuth.py`: azimuth map, stability (R), confidence mask
-- `src/plotting.py`: independent plotting modules
-- `src/pipeline.py`: end-to-end analysis assembly
-
-## Quick start
-
-1. Install dependencies:
+## 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Put SAC files in the project root or set `data_dir` in notebook cells.
-
-3. Run with script or notebook:
+## 2. 启动界面
 
 ```bash
-python run.py
+streamlit run app.py
 ```
 
-## Notes
+## 3. 数据放置位置
 
-- Plots support both PNG and PDF outputs.
-- The notebook controls which modules to render and save.
-- Use `PipelineParams(time_slice_s=(start_s, end_s))` to analyze only an interested segment.
-- Preprocess defaults are enabled: de-mean, de-trend, bandpass (`2 Hz` to `0.8 * Nyquist`), orientation correction (`0 deg` by default).
-- Table outputs, feature extraction, truth-based validation, batch processing, and GUI are tracked as TODOs.
+- 输入数据目录：`data/`
+- 每个事件需要同前缀四个文件：
+  - `xxx.bh1.sac`
+  - `xxx.bh2.sac`
+  - `xxx.bhz.sac`
+  - `xxx.hyd.sac`
+
+你也可以在 UI 中直接上传 `.sac` 文件，系统会自动保存到 `data/`。
+
+## 4. 结果保存位置
+
+- 输出目录：`results/`
+- 处理后生成的图像和文件统一保存在该目录。
+
+## 5. 最小操作流程
+
+1. 把 `.sac` 数据放到 `data/`（或在 UI 上传）。
+2. 运行 `streamlit run app.py`。
+3. 打开浏览器后：
+   - 选择事件
+   - 调整参数（数据输入、预处理、核心处理、绘图、输出、高级参数）
+   - 点击“开始运行”
+4. 查看页面中的运行日志、结果图和输出文件列表。
+5. 点击下载按钮获取结果文件。
+
+## 6. 入口说明
+
+- 普通用户入口：`app.py`（Streamlit UI）
+- 教学示例入口：`Easy_Example.ipynb`（保留）

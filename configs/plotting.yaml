@@ -1,8 +1,0 @@
-font_name: Helvetica
-dpi: 300
-figsize: [7.2, 3.2]
-cmap_spec: viridis
-cmap_lofar: plasma
-cmap_azi: hsv
-cmap_stability: RdYlBu_r
-formats: [png, pdf]

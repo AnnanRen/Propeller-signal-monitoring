@@ -1,6 +1,5 @@
+streamlit
 numpy
 scipy
 matplotlib
 obspy
-pyyaml
-jupyter
