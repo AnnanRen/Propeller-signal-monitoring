@@ -139,3 +139,116 @@ def suggest_frequency_bands(
         "candidates": [(float(lo), float(hi)) for lo, hi, _ in candidates],
         "recommended": (float(recommended[0]), float(recommended[1])),
     }
+
+
+def _window_to_mask(
+    t_spec: np.ndarray,
+    window_s: Tuple[float, float],
+    label: str,
+) -> np.ndarray:
+    start_s = float(window_s[0])
+    end_s = float(window_s[1])
+    if end_s <= start_s:
+        raise ValueError(f"{label} end must be greater than start, got: {window_s}")
+
+    t = np.asarray(t_spec, dtype=float)
+    if t.size == 0:
+        raise ValueError("STFT time axis is empty.")
+
+    t_min = float(np.min(t))
+    t_max = float(np.max(t))
+    if start_s > t_max or end_s < t_min:
+        raise ValueError(f"{label} window {window_s} is outside STFT time range [{t_min:.3f}, {t_max:.3f}] s.")
+
+    mask = (t >= start_s) & (t <= end_s)
+    if not np.any(mask):
+        raise ValueError(f"{label} window {window_s} has no valid STFT bins in [{t_min:.3f}, {t_max:.3f}] s.")
+    return mask
+
+
+def compute_snr_from_spectrograms(
+    spectrograms_sel: Dict[str, np.ndarray],
+    t_spec: np.ndarray,
+    noise_window_s: Tuple[float, float],
+) -> Dict[str, object]:
+    noise_mask = _window_to_mask(t_spec, noise_window_s, "noise")
+
+    snr_db_by_component: Dict[str, float] = {}
+    snr_series_by_component: Dict[str, np.ndarray] = {}
+    eps = np.finfo(float).eps
+
+    for comp, s_complex in spectrograms_sel.items():
+        power_tf = np.abs(np.asarray(s_complex, dtype=np.complex128)) ** 2
+        rms_t = np.sqrt(np.mean(power_tf, axis=0))
+
+        noise_rms = float(np.sqrt(np.mean(np.square(rms_t[noise_mask]))))
+        if not np.isfinite(noise_rms) or noise_rms <= eps:
+            raise ValueError(
+                f"Noise RMS is near zero or invalid for component {comp}. "
+                "Please choose another noise window with effective background energy."
+            )
+
+        snr_t_db = 20.0 * np.log10((rms_t + eps) / noise_rms)
+        # Whole-segment SNR summary from STFT-bin sequence.
+        snr_db = float(np.mean(snr_t_db))
+
+        snr_db_by_component[comp] = snr_db
+        snr_series_by_component[comp] = snr_t_db.astype(np.float64)
+
+    return {
+        "snr": snr_db_by_component,
+        "snr_hyd_db": float(snr_db_by_component.get("HYD")) if "HYD" in snr_db_by_component else None,
+        "snr_series": snr_series_by_component,
+        "snr_windows": {
+            "signal_window_s": None,
+            "noise_window_s": (float(noise_window_s[0]), float(noise_window_s[1])),
+        },
+    }
+
+
+def suggest_noise_window(
+    hyd_spectrogram_sel: np.ndarray,
+    t_spec: np.ndarray,
+    window_length_s: float = 60.0,
+) -> Tuple[float, float]:
+    t = np.asarray(t_spec, dtype=float)
+    if t.size < 2:
+        raise ValueError("Not enough STFT time bins for auto noise-window suggestion.")
+
+    power_tf = np.abs(np.asarray(hyd_spectrogram_sel, dtype=np.complex128)) ** 2
+    rms_t = np.sqrt(np.mean(power_tf, axis=0))
+    if rms_t.size != t.size:
+        raise ValueError("HYD spectrogram time axis is inconsistent with STFT time bins.")
+
+    target_len = float(window_length_s)
+    if target_len <= 0:
+        raise ValueError(f"window_length_s must be > 0, got: {window_length_s}")
+
+    dt_bins = np.median(np.diff(t))
+    if not np.isfinite(dt_bins) or dt_bins <= 0:
+        raise ValueError("Invalid STFT time spacing for auto noise-window suggestion.")
+    bins = max(2, int(round(target_len / dt_bins)))
+    bins = min(bins, t.size)
+
+    means = []
+    stds = []
+    starts = []
+    for i in range(0, t.size - bins + 1):
+        seg = rms_t[i : i + bins]
+        means.append(float(np.mean(seg)))
+        stds.append(float(np.std(seg)))
+        starts.append(i)
+
+    if not starts:
+        raise ValueError("Cannot build candidate windows for auto noise-window suggestion.")
+
+    mean_arr = np.asarray(means, dtype=np.float64)
+    std_arr = np.asarray(stds, dtype=np.float64)
+    mean_norm = (mean_arr - np.min(mean_arr)) / (np.ptp(mean_arr) + 1e-12)
+    std_norm = (std_arr - np.min(std_arr)) / (np.ptp(std_arr) + 1e-12)
+    score = 0.5 * mean_norm + 0.5 * std_norm
+
+    best_idx = int(np.argmin(score))
+    i0 = starts[best_idx]
+    i1 = i0 + bins - 1
+    return float(t[i0]), float(t[i1])

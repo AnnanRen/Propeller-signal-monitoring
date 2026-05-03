@@ -20,6 +20,7 @@ from .plotting import (
     plot_azimuth_stability as plot_azimuth_stability_fn,
     plot_confidence_map as plot_confidence_map_fn,
     plot_lofar as plot_lofar_fn,
+    plot_snr_curve as plot_snr_curve_fn,
     plot_merged_panels as plot_merged_panels_fn,
     plot_spectrogram as plot_spectrogram_fn,
     plot_waveform as plot_waveform_fn,
@@ -27,6 +28,7 @@ from .plotting import (
 from .preprocess import preprocess_signals
 from .segment import crop_signals_by_time
 from .spectral import SpectralParams, compute_stft, lofar_from_spectrogram, power_db, suggest_frequency_bands
+from .spectral import compute_snr_from_spectrograms, suggest_noise_window
 
 
 @dataclass
@@ -43,6 +45,9 @@ class PipelineParams:
     stability_window: int = 15
     stability_step: int = 5
     confidence_threshold: float = 0.6
+    snr_noise_window_s: Tuple[float, float] | None = None
+    compute_snr: bool = False
+    snr_auto_noise_window_s: float = 60.0
 
 
 COMPONENTS = ("BH1", "BH2", "BHZ", "HYD")
@@ -173,6 +178,30 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
         azi_info["intensity"],
     )
     azi_masked = apply_confidence_mask(azi_info["azimuth_deg"], conf, params.confidence_threshold)
+    snr_payload = {
+        "snr": {},
+        "snr_hyd_db": None,
+        "snr_series": {},
+        "snr_windows": {"signal_window_s": None, "noise_window_s": None},
+        "snr_noise_window_source": None,
+    }
+    if params.compute_snr:
+        if params.snr_noise_window_s is not None:
+            noise_window_s = params.snr_noise_window_s
+            noise_source = "manual"
+        else:
+            noise_window_s = suggest_noise_window(
+                spectrograms_sel["HYD"],
+                t_spec=t_spec,
+                window_length_s=float(params.snr_auto_noise_window_s),
+            )
+            noise_source = "auto"
+        snr_payload = compute_snr_from_spectrograms(
+            spectrograms_sel=spectrograms_sel,
+            t_spec=t_spec,
+            noise_window_s=noise_window_s,
+        )
+        snr_payload["snr_noise_window_source"] = noise_source
 
     return {
         "event_id": payload["event_id"],
@@ -192,6 +221,11 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
         "time_slice_s": params.time_slice_s,
         "crop_info": crop_info,
         "preprocess_report": preprocess_report,
+        "snr": snr_payload["snr"],
+        "snr_hyd_db": snr_payload["snr_hyd_db"],
+        "snr_series": snr_payload["snr_series"],
+        "snr_windows": snr_payload["snr_windows"],
+        "snr_noise_window_source": snr_payload["snr_noise_window_source"],
         "utc_start": utc_start,
         "utc_start_iso": utc_start.isoformat(),
     }
@@ -227,6 +261,10 @@ def run_pipeline(
     plot_azimuth_mask=True,
     plot_confidence=True,
     plot_azimuth_confidence=None,
+    plot_snr=True,
+    compute_snr=False,
+    snr_noise_window_s=None,
+    snr_auto_noise_window_s=60.0,
     merge_all_plots=True,
     normalize_waveform=True,
     plot_font_name="Helvetica",
@@ -259,7 +297,7 @@ def run_pipeline(
         "waveform": bool(plot_waveform),
         "spectrogram": bool(plot_spectrogram),
         "lofar": bool(plot_lofar),
-        "snr": False,
+        "snr": bool(plot_snr),
         "azimuth_mask": bool(plot_azimuth_mask),
         "azimuth": bool(plot_azimuth),
         "confidence": confidence_flag,
@@ -278,6 +316,9 @@ def run_pipeline(
         "stability_window": int(stability_window),
         "stability_step": int(stability_step),
         "confidence_threshold": float(confidence_threshold),
+        "compute_snr": bool(compute_snr),
+        "snr_noise_window_s": snr_noise_window_s,
+        "snr_auto_noise_window_s": float(snr_auto_noise_window_s),
     }
 
     bundles = list_events(data_dir)
@@ -348,6 +389,20 @@ def run_pipeline(
                     fig.savefig(output_dir / f"{event_clean}_all.{fmt}", dpi=fig.dpi, bbox_inches="tight", facecolor="white")
             plt.close(fig)
             module_component_pairs.append(("all", ""))
+        if plot_flags["snr"] and result["snr_series"] and ("HYD" in result["snr_series"]):
+            fig, _ = plot_snr_curve_fn(
+                result["t_spec"],
+                result["snr_series"]["HYD"],
+                "HYD",
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+                noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+                noise_window_source=result.get("snr_noise_window_source"),
+                show_noise_window=True,
+            )
+            plt.close(fig)
+            module_component_pairs.append(("snr", "HYD"))
     else:
         if plot_flags["waveform"]:
             fig, _ = plot_waveform_fn(
@@ -436,6 +491,20 @@ def run_pipeline(
             )
             plt.close(fig)
             module_component_pairs.append(("azimuth_stability", "ALL"))
+        if plot_flags["snr"] and result["snr_series"] and ("HYD" in result["snr_series"]):
+            fig, _ = plot_snr_curve_fn(
+                result["t_spec"],
+                result["snr_series"]["HYD"],
+                "HYD",
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+                noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+                noise_window_source=result.get("snr_noise_window_source"),
+                show_noise_window=True,
+            )
+            plt.close(fig)
+            module_component_pairs.append(("snr", "HYD"))
 
     output_files = []
     event_clean = _clean_name(result["event_id"])
@@ -459,6 +528,10 @@ def run_pipeline(
         f"window_length_s={window_length_s}",
         f"overlap={overlap}",
         f"orientation_deg={orientation_deg}",
+        f"compute_snr={compute_snr}",
+        f"snr_noise_window_s={snr_noise_window_s}",
+        f"snr_noise_window_source={result['snr_noise_window_source']}",
+        f"snr_hyd_db={result['snr_hyd_db']}",
         f"saved_files={len(output_files)}",
     ]
 
