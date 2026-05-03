@@ -365,6 +365,48 @@ def plot_confidence_map(
     return fig, ax
 
 
+def plot_snr_curve(
+    t_spec: np.ndarray,
+    snr_db: np.ndarray,
+    component_name: str,
+    plot_params: PlotParams,
+    save_opts: SaveOptions,
+    utc_start: dt.datetime | None = None,
+    noise_window_s: tuple[float, float] | None = None,
+    noise_window_source: str | None = None,
+    show_noise_window: bool = True,
+):
+    fig, ax = plt.subplots(1, 1, figsize=plot_params.figsize, dpi=plot_params.dpi)
+    t_axis = _to_x_axis_values(t_spec, utc_start)
+    y = np.asarray(snr_db, dtype=np.float64)
+    ax.plot(t_axis, y, color="tab:red", linewidth=max(plot_params.linewidth_waveform, 0.8))
+
+    if show_noise_window and noise_window_s is not None:
+        w0 = float(noise_window_s[0])
+        w1 = float(noise_window_s[1])
+        if utc_start is not None:
+            x0 = mdates.date2num(utc_start + dt.timedelta(seconds=w0))
+            x1 = mdates.date2num(utc_start + dt.timedelta(seconds=w1))
+        else:
+            x0 = w0
+            x1 = w1
+        src = str(noise_window_source or "unknown").lower()
+        fill_color = "tab:orange" if src == "auto" else "tab:green"
+        label = f"Noise Window ({src}) [{w0:.1f}s, {w1:.1f}s]"
+        ax.axvspan(x0, x1, color=fill_color, alpha=0.22, label=label)
+        ax.legend(loc="best", fontsize=8, framealpha=0.9)
+
+    ax.set_title(f"{component_name} SNR Curve", fontname=plot_params.font_name)
+    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    _style_axes(ax, plot_params.font_name, xlabel, "SNR (dB)", plot_params.grid_alpha)
+    ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
+    _configure_utc_axis(ax, utc_start is not None)
+    fig.tight_layout()
+
+    _save_figure(fig, "snr", component_name, save_opts)
+    return fig, ax
+
+
 def plot_merged_panels(
     selected_panels: list[str],
     t_sec: np.ndarray,

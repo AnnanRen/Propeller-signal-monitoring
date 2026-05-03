@@ -26,6 +26,7 @@ PLOT_OPTIONS = [
     "波形图",
     "时频谱图",
     "LOFAR图",
+    "SNR曲线图(HYD)",
     "方位角遮罩谱",
     "方位角谱图",
     "方位角R值谱",
@@ -92,6 +93,7 @@ def _build_plot_flags(selected_items: list[str]) -> dict[str, bool]:
         "波形图": "plot_waveform",
         "时频谱图": "plot_spectrogram",
         "LOFAR图": "plot_lofar",
+        "SNR曲线图(HYD)": "plot_snr",
         "方位角遮罩谱": "plot_azimuth_mask",
         "方位角谱图": "plot_azimuth",
         "方位角R值谱": "plot_azimuth_stability",
@@ -212,6 +214,10 @@ def _show_logs_and_downloads(run_info: dict, output_paths: list[Path]) -> None:
     st.text(f"- 分量：{run_info['component']}")
     st.text(f"- 时间裁切：{result_payload.get('time_slice_s')}")
     st.text(f"- 预处理：{preprocess_report}")
+    st.text(f"- SNR噪声窗：{result_payload.get('snr_windows', {}).get('noise_window_s')}")
+    st.text(f"- SNR噪声窗来源：{result_payload.get('snr_noise_window_source')}")
+    if result_payload.get("snr_hyd_db") is not None:
+        st.text(f"- HYD SNR(dB)：{float(result_payload['snr_hyd_db']):.2f}")
     st.text(f"- 输出文件数量：{len(run_info['output_files'])}")
 
     st.markdown("**输出文件列表与下载**")
@@ -544,6 +550,17 @@ def main() -> None:
             st.number_input("稳定性窗口大小", min_value=2, step=1, key="stability_window")
             st.number_input("稳定性步长", min_value=1, step=1, key="stability_step")
             st.slider("置信度阈值", min_value=0.0, max_value=1.0, step=0.05, key="confidence_threshold")
+            compute_snr = st.checkbox("启用SNR计算", value=False)
+            snr_auto_noise_window_s = st.number_input("自动噪声窗长度 (秒)", min_value=5.0, value=60.0, step=1.0)
+            use_manual_noise = st.checkbox("手动噪声窗覆盖", value=False)
+            snr_noise_window_s = None
+            if use_manual_noise:
+                snr_noise_start = st.number_input("手动噪声窗起始时间 (秒)", min_value=0.0, value=0.0, step=1.0)
+                snr_noise_end = st.number_input("手动噪声窗结束时间 (秒)", min_value=0.1, value=60.0, step=1.0)
+                if snr_noise_end <= snr_noise_start:
+                    st.error("噪声窗结束时间必须大于起始时间。")
+                    return
+                snr_noise_window_s = (float(snr_noise_start), float(snr_noise_end))
 
         out1, out2 = st.columns([1.6, 1.0], gap="small")
         with out1:
@@ -653,6 +670,10 @@ def main() -> None:
                         plot_azimuth_stability=plot_flags["plot_azimuth_stability"],
                         plot_azimuth_mask=plot_flags["plot_azimuth_mask"],
                         plot_confidence=plot_flags["plot_azimuth_confidence"],
+                        plot_snr=plot_flags["plot_snr"],
+                        compute_snr=bool(compute_snr),
+                        snr_noise_window_s=snr_noise_window_s,
+                        snr_auto_noise_window_s=float(snr_auto_noise_window_s),
                         merge_all_plots=bool(merge_all_plots),
                         normalize_waveform=bool(normalize_waveform),
                         plot_font_name=plot_font_name,
