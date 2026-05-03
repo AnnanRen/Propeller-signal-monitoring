@@ -15,6 +15,7 @@ from src.plotting import (
     plot_azimuth_stability,
     plot_confidence_map,
     plot_lofar,
+    plot_snr_curve,
     plot_spectrogram,
     plot_waveform,
 )
@@ -32,33 +33,6 @@ PLOT_OPTIONS = [
     "方位角R值谱",
     "方位置信度图",
 ]
-
-PRESET_CONFIGS = {
-    "快速": {
-        "window_length_s": 1.5,
-        "overlap": 0.4,
-        "stability_window": 10,
-        "stability_step": 4,
-        "confidence_threshold": 0.55,
-        "plot_items": ["波形图", "时频谱图", "方位角遮罩谱"],
-    },
-    "标准": {
-        "window_length_s": 2.0,
-        "overlap": 0.5,
-        "stability_window": 15,
-        "stability_step": 5,
-        "confidence_threshold": 0.6,
-        "plot_items": ["波形图", "时频谱图", "方位角遮罩谱"],
-    },
-    "精细": {
-        "window_length_s": 3.0,
-        "overlap": 0.65,
-        "stability_window": 24,
-        "stability_step": 6,
-        "confidence_threshold": 0.7,
-        "plot_items": PLOT_OPTIONS,
-    },
-}
 
 STATUS_STYLE = {
     "idle": ("未开始", "status-idle"),
@@ -101,26 +75,6 @@ def _build_plot_flags(selected_items: list[str]) -> dict[str, bool]:
         "方位置信度图": "plot_azimuth_confidence",
     }
     return {value: (label in selected_items) for label, value in mapping.items()}
-
-
-def _apply_preset_to_state(preset_name: str) -> None:
-    cfg = PRESET_CONFIGS[preset_name]
-    st.session_state.window_length_s = float(cfg["window_length_s"])
-    st.session_state.overlap = float(cfg["overlap"])
-    st.session_state.stability_window = int(cfg["stability_window"])
-    st.session_state.stability_step = int(cfg["stability_step"])
-    st.session_state.confidence_threshold = float(cfg["confidence_threshold"])
-    st.session_state.plot_items = list(cfg["plot_items"])
-
-
-def _sync_preset_state() -> None:
-    if "preset_name" not in st.session_state:
-        st.session_state.preset_name = "标准"
-    if "preset_applied" not in st.session_state:
-        st.session_state.preset_applied = ""
-    if st.session_state.preset_applied != st.session_state.preset_name:
-        _apply_preset_to_state(st.session_state.preset_name)
-        st.session_state.preset_applied = st.session_state.preset_name
 
 
 def _sync_run_state() -> None:
@@ -166,6 +120,7 @@ def _group_output_images(output_paths: list[Path]) -> dict[str, list[Path]]:
     groups = {
         "合并图": [],
         "波形": [],
+        "SNR": [],
         "时频": [],
         "LOFAR": [],
         "遮罩": [],
@@ -191,6 +146,8 @@ def _group_output_images(output_paths: list[Path]) -> dict[str, list[Path]]:
             groups["稳定性"].append(p)
         elif "azimuth_confidence" in name or "confidence" in name:
             groups["置信度"].append(p)
+        elif "snr" in name:
+            groups["SNR"].append(p)
         elif "azimuth" in name:
             groups["方位角"].append(p)
     return groups
@@ -216,6 +173,7 @@ def _show_logs_and_downloads(run_info: dict, output_paths: list[Path]) -> None:
     st.text(f"- 预处理：{preprocess_report}")
     st.text(f"- SNR噪声窗：{result_payload.get('snr_windows', {}).get('noise_window_s')}")
     st.text(f"- SNR噪声窗来源：{result_payload.get('snr_noise_window_source')}")
+    st.text(f"- 时区偏移：{result_payload.get('timezone_offset_hours', 8)}")
     if result_payload.get("snr_hyd_db") is not None:
         st.text(f"- HYD SNR(dB)：{float(result_payload['snr_hyd_db']):.2f}")
     st.text(f"- 输出文件数量：{len(run_info['output_files'])}")
@@ -265,6 +223,7 @@ def _render_temp_plot(panel: str, run_info: dict, plot_flags: dict, plot_cfg: di
         freq_max=float(run_info["selected_band"][1]),
         linewidth_waveform=float(plot_cfg.get("plot_linewidth_waveform", 0.4)),
         grid_alpha=float(plot_cfg.get("plot_grid_alpha", 0.2)),
+        timezone_offset_hours=int(plot_cfg.get("timezone_offset_hours", 8)),
     )
     save_opts = SaveOptions(save=False)
 
@@ -272,6 +231,7 @@ def _render_temp_plot(panel: str, run_info: dict, plot_flags: dict, plot_cfg: di
         "wave": "plot_waveform",
         "spec": "plot_spectrogram",
         "lofar": "plot_lofar",
+        "snr": "plot_snr",
         "mask": "plot_azimuth_mask",
         "azi": "plot_azimuth",
         "stab": "plot_azimuth_stability",
@@ -286,6 +246,9 @@ def _render_temp_plot(panel: str, run_info: dict, plot_flags: dict, plot_cfg: di
             save_opts,
             normalize=bool(plot_cfg.get("normalize_waveform", True)),
             utc_start=show_utc,
+            noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+            noise_window_source=result.get("snr_noise_window_source"),
+            show_noise_window=True,
         )
     elif panel == "spec":
         fig, _ = plot_spectrogram(
@@ -335,6 +298,22 @@ def _render_temp_plot(panel: str, run_info: dict, plot_flags: dict, plot_cfg: di
             save_opts,
             utc_start=show_utc,
         )
+    elif panel == "snr":
+        if result.get("snr_series") and ("HYD" in result["snr_series"]):
+            fig, _ = plot_snr_curve(
+                result["t_spec"],
+                result["snr_series"]["HYD"],
+                "HYD",
+                params,
+                save_opts,
+                utc_start=show_utc,
+                noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+                noise_window_source=result.get("snr_noise_window_source"),
+                show_noise_window=True,
+            )
+        else:
+            st.info("当前运行没有可用的 SNR 序列。")
+            return
     else:
         fig, _ = plot_confidence_map(
             result["t_spec"],
@@ -372,13 +351,14 @@ def main() -> None:
             --ui-err: #b91c1c;
         }
         .stApp { background: linear-gradient(180deg, #f8fbfe 0%, var(--ui-bg) 100%); }
-        .block-container { padding-top: 1rem; padding-bottom: 1.2rem; }
+        .block-container { padding-top: 0.6rem; padding-bottom: 0.8rem; }
+        h1, h2, h3 { margin-bottom: 0.3rem; }
         .summary-card {
             background: #fbfdff;
             border: 1px solid var(--ui-border);
             border-radius: 10px;
-            padding: 10px;
-            min-height: 86px;
+            padding: 8px;
+            min-height: 72px;
         }
         .summary-title {
             font-size: 0.82rem;
@@ -417,15 +397,15 @@ def main() -> None:
             border: 1px solid var(--ui-border);
             border-left: 6px solid var(--ui-accent);
             border-radius: 10px;
-            padding: 10px 12px;
-            margin: 0.4rem 0 0.8rem 0;
+            padding: 8px 10px;
+            margin: 0.25rem 0 0.5rem 0;
         }
         .run-modal {
             border: 2px solid #fb923c;
             background: #fff7ed;
             border-radius: 12px;
-            padding: 12px;
-            margin-bottom: 0.8rem;
+            padding: 10px;
+            margin-bottom: 0.5rem;
             box-shadow: 0 6px 18px rgba(251,146,60,0.18);
         }
         .run-modal-title { font-weight: 800; color: #9a3412; margin-bottom: 4px; }
@@ -435,11 +415,16 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    _sync_preset_state()
     _sync_run_state()
+    st.session_state.setdefault("window_length_s", 2.0)
+    st.session_state.setdefault("overlap", 0.5)
+    st.session_state.setdefault("stability_window", 15)
+    st.session_state.setdefault("stability_step", 5)
+    st.session_state.setdefault("confidence_threshold", 0.6)
+    st.session_state.setdefault("plot_items", ["波形图", "时频谱图", "方位角遮罩谱"])
 
     st.title("螺旋桨实验数据处理 UI")
-    st.caption("手风琴分步：一次聚焦一步；运行阶段提供明显状态提示。")
+    st.caption("四步流程：配置、运行、查看结果。")
 
     step1_open = True
     step2_open = False
@@ -495,25 +480,6 @@ def main() -> None:
     step2_open = True
 
     with st.expander(_step_title("Step 2 参数配置", status2, can_continue=True), expanded=step2_open):
-        pcol1, pcol2 = st.columns([1.0, 2.1], gap="small")
-        with pcol1:
-            st.selectbox(
-                "参数预设",
-                ["快速", "标准", "精细"],
-                key="preset_name",
-                help="切换预设会自动回填关键参数，但你仍可在下方继续调整。",
-            )
-            _sync_preset_state()
-
-        with pcol2:
-            tips = PRESET_CONFIGS[st.session_state.preset_name]
-            st.info(
-                "当前预设："
-                f"时窗 {tips['window_length_s']}s，重叠 {tips['overlap']:.2f}，"
-                f"稳定窗口 {tips['stability_window']}，步长 {tips['stability_step']}，"
-                f"阈值 {tips['confidence_threshold']:.2f}。"
-            )
-
         common1, common2, common3 = st.columns([1.2, 1.2, 1.0], gap="small")
         with common1:
             use_auto_band = st.checkbox("使用自动频段推荐", value=False)
@@ -535,6 +501,7 @@ def main() -> None:
             apply_orientation = st.checkbox("方位角矫正", value=True)
             orientation_deg = st.number_input("方位矫正角度 (度，逆时针为正)", value=0.0, step=0.1)
             normalize_waveform = st.checkbox("波形标准化显示", value=True)
+            timezone_offset_hours = st.number_input("时区偏移 (小时)", min_value=-12, max_value=14, value=8, step=1)
 
         with common3:
             use_time_slice = st.checkbox("启用时间裁切", value=False)
@@ -580,6 +547,7 @@ def main() -> None:
             merge_all_plots = st.checkbox("合并所有图片", value=True)
 
         plot_flags = _build_plot_flags(st.session_state.plot_items)
+        compute_snr_effective = bool(compute_snr) or bool(plot_flags["plot_snr"])
 
         plot_font_name = "Helvetica"
         plot_dpi = 300
@@ -671,7 +639,7 @@ def main() -> None:
                         plot_azimuth_mask=plot_flags["plot_azimuth_mask"],
                         plot_confidence=plot_flags["plot_azimuth_confidence"],
                         plot_snr=plot_flags["plot_snr"],
-                        compute_snr=bool(compute_snr),
+                        compute_snr=bool(compute_snr_effective),
                         snr_noise_window_s=snr_noise_window_s,
                         snr_auto_noise_window_s=float(snr_auto_noise_window_s),
                         merge_all_plots=bool(merge_all_plots),
@@ -687,6 +655,7 @@ def main() -> None:
                         plot_cmap_confidence=plot_cmap_confidence,
                         plot_linewidth_waveform=float(plot_linewidth_waveform),
                         plot_grid_alpha=float(plot_grid_alpha),
+                        timezone_offset_hours=int(timezone_offset_hours),
                     )
                     running_banner.empty()
                     st.session_state.run_status = "success"
@@ -708,6 +677,7 @@ def main() -> None:
                         "plot_cmap_confidence": plot_cmap_confidence,
                         "plot_linewidth_waveform": float(plot_linewidth_waveform),
                         "plot_grid_alpha": float(plot_grid_alpha),
+                        "timezone_offset_hours": int(timezone_offset_hours),
                     }
                     st.session_state.run_info = run_info
                     st.success("运行完成。")
@@ -737,8 +707,8 @@ def main() -> None:
         run_plot_flags = st.session_state.get("run_plot_flags", {})
         run_plot_config = st.session_state.get("run_plot_config", {})
 
-        tab_all, tab_wave, tab_spec, tab_lofar, tab_mask, tab_azi, tab_stab, tab_conf, tab_log = st.tabs(
-            ["合并图", "波形", "时频", "LOFAR", "遮罩", "方位角", "稳定性", "置信度", "日志与下载"]
+        tab_all, tab_wave, tab_snr, tab_spec, tab_lofar, tab_mask, tab_azi, tab_stab, tab_conf, tab_log = st.tabs(
+            ["合并图", "波形", "SNR", "时频", "LOFAR", "遮罩", "方位角", "稳定性", "置信度", "日志与下载"]
         )
 
         with tab_all:
@@ -752,6 +722,15 @@ def main() -> None:
                     _show_images(grouped["波形"])
                 else:
                     _render_temp_plot("wave", run_info, run_plot_flags, run_plot_config)
+        with tab_snr:
+            _panel_flag_notice("plot_snr", run_plot_flags)
+            if merged_mode:
+                _render_temp_plot("snr", run_info, run_plot_flags, run_plot_config)
+            else:
+                if grouped["SNR"]:
+                    _show_images(grouped["SNR"])
+                else:
+                    _render_temp_plot("snr", run_info, run_plot_flags, run_plot_config)
         with tab_spec:
             _panel_flag_notice("plot_spectrogram", run_plot_flags)
             if merged_mode:

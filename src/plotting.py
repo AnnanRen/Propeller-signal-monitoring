@@ -26,6 +26,7 @@ class PlotParams:
     freq_max: float = 400.0
     linewidth_waveform: float = 0.4
     grid_alpha: float = 0.2
+    timezone_offset_hours: int = 8
 
 
 @dataclass
@@ -75,6 +76,35 @@ def _configure_utc_axis(ax: plt.Axes, use_utc: bool) -> None:
     ax.xaxis.set_major_formatter(formatter)
 
 
+def _tz_label(offset_hours: int) -> str:
+    sign = "+" if int(offset_hours) >= 0 else ""
+    return f"Time ({sign}{int(offset_hours)})"
+
+
+def _apply_local_time_axis(ax: plt.Axes, utc_start: dt.datetime | None, offset_hours: int) -> None:
+    if utc_start is None:
+        return
+    tz = dt.timezone(dt.timedelta(hours=int(offset_hours)))
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=8, tz=tz)
+    formatter = mdates.ConciseDateFormatter(locator, tz=tz)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+
+def _add_relative_seconds_axis(
+    ax: plt.Axes,
+    utc_start: dt.datetime | None,
+) -> None:
+    secax = ax.secondary_xaxis(
+        "top",
+        functions=(
+            (lambda x: (x - mdates.date2num(utc_start)) * 86400.0) if utc_start is not None else (lambda x: x),
+            (lambda s: mdates.date2num(utc_start) + s / 86400.0) if utc_start is not None else (lambda s: s),
+        ),
+    )
+    secax.set_xlabel("Relative Time (s)")
+
+
 def _save_figure(fig: plt.Figure, module_name: str, component_name: str, opts: SaveOptions) -> None:
     if not opts.save:
         return
@@ -93,16 +123,34 @@ def plot_waveform(
     save_opts: SaveOptions,
     normalize: bool = True,
     utc_start: dt.datetime | None = None,
+    noise_window_s: tuple[float, float] | None = None,
+    noise_window_source: str | None = None,
+    show_noise_window: bool = True,
 ):
     fig, ax = plt.subplots(1, 1, figsize=plot_params.figsize, dpi=plot_params.dpi)
     x = zscore_safe(signal) if normalize else signal
     t_axis = _to_x_axis_values(t_sec, utc_start)
     ax.plot(t_axis, x, color="tab:blue", linewidth=plot_params.linewidth_waveform)
+    if show_noise_window and noise_window_s is not None:
+        w0 = float(noise_window_s[0])
+        w1 = float(noise_window_s[1])
+        if utc_start is not None:
+            x0 = mdates.date2num(utc_start + dt.timedelta(seconds=w0))
+            x1 = mdates.date2num(utc_start + dt.timedelta(seconds=w1))
+        else:
+            x0 = w0
+            x1 = w1
+        src = str(noise_window_source or "unknown").lower()
+        fill_color = "tab:orange" if src == "auto" else "tab:green"
+        label = f"Noise Window ({src}) [{w0:.1f}s, {w1:.1f}s]"
+        ax.axvspan(x0, x1, color=fill_color, alpha=0.22, label=label)
+        ax.legend(loc="best", fontsize=8, framealpha=0.9)
     ax.set_title(f"{component_name} Waveform", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Amplitude", plot_params.grid_alpha)
     ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
+    _add_relative_seconds_axis(ax, utc_start)
     fig.tight_layout()
 
     _save_figure(fig, "waveform", component_name, save_opts)
@@ -136,9 +184,9 @@ def plot_spectrogram(
         vmax=vmax,
     )
     ax.set_title(f"{component_name} Spectrogram", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("Magnitude (dB)", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -174,9 +222,9 @@ def plot_lofar(
         vmax=vmax,
     )
     ax.set_title(f"{component_name} LOFAR", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("Normalized Power", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -206,9 +254,9 @@ def plot_azimuth_spectrogram(
         vmax=360,
     )
     ax.set_title("Azimuth Spectrogram", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -238,9 +286,9 @@ def plot_azimuth_stability(
         vmax=1,
     )
     ax.set_title("Azimuth Stability (R)", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("R", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -272,9 +320,9 @@ def plot_azimuth_confidence_mask(
         vmax=360,
     )
     axes[0].set_title(f"Azimuth (confidence >= {threshold:.2f})", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(axes[0], plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(axes[0], utc_start is not None)
+    _apply_local_time_axis(axes[0], utc_start, int(plot_params.timezone_offset_hours))
     cb1 = fig.colorbar(im1, ax=axes[0], pad=0.01)
     cb1.set_label("Azimuth (deg)", fontname=plot_params.font_name)
 
@@ -292,7 +340,7 @@ def plot_azimuth_confidence_mask(
     )
     axes[1].set_title("Confidence Map", fontname=plot_params.font_name)
     _style_axes(axes[1], plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(axes[1], utc_start is not None)
+    _apply_local_time_axis(axes[1], utc_start, int(plot_params.timezone_offset_hours))
     cb2 = fig.colorbar(im2, ax=axes[1], pad=0.01)
     cb2.set_label("Confidence", fontname=plot_params.font_name)
 
@@ -322,9 +370,9 @@ def plot_azimuth_mask(
         vmax=360,
     )
     ax.set_title(f"Azimuth (confidence >= {threshold:.2f})", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -355,9 +403,9 @@ def plot_confidence_map(
         vmax=cmax,
     )
     ax.set_title("Confidence Map", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     cb = fig.colorbar(im, ax=ax, pad=0.01)
     cb.set_label("Confidence", fontname=plot_params.font_name)
     fig.tight_layout()
@@ -397,10 +445,10 @@ def plot_snr_curve(
         ax.legend(loc="best", fontsize=8, framealpha=0.9)
 
     ax.set_title(f"{component_name} SNR Curve", fontname=plot_params.font_name)
-    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
     _style_axes(ax, plot_params.font_name, xlabel, "SNR (dB)", plot_params.grid_alpha)
     ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
-    _configure_utc_axis(ax, utc_start is not None)
+    _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
     fig.tight_layout()
 
     _save_figure(fig, "snr", component_name, save_opts)
@@ -424,8 +472,11 @@ def plot_merged_panels(
     plot_params: PlotParams,
     normalize_waveform: bool = True,
     utc_start: dt.datetime | None = None,
+    snr_series_hyd: np.ndarray | None = None,
+    snr_noise_window_s: tuple[float, float] | None = None,
+    snr_noise_window_source: str | None = None,
 ):
-    panels = [p for p in selected_panels if p != "snr"]
+    panels = list(selected_panels)
     n = len(panels)
     if n == 0:
         raise ValueError("No panels selected for merged plotting.")
@@ -446,11 +497,26 @@ def plot_merged_panels(
             x = zscore_safe(signal) if normalize_waveform else signal
             t_axis = _to_x_axis_values(t_sec, utc_start)
             ax.plot(t_axis, x, color="tab:blue", linewidth=plot_params.linewidth_waveform)
+            if snr_noise_window_s is not None:
+                w0 = float(snr_noise_window_s[0])
+                w1 = float(snr_noise_window_s[1])
+                if utc_start is not None:
+                    x0 = mdates.date2num(utc_start + dt.timedelta(seconds=w0))
+                    x1 = mdates.date2num(utc_start + dt.timedelta(seconds=w1))
+                else:
+                    x0 = w0
+                    x1 = w1
+                src = str(snr_noise_window_source or "unknown").lower()
+                fill_color = "tab:orange" if src == "auto" else "tab:green"
+                label = f"Noise Window ({src}) [{w0:.1f}s, {w1:.1f}s]"
+                ax.axvspan(x0, x1, color=fill_color, alpha=0.22, label=label)
+                ax.legend(loc="best", fontsize=8, framealpha=0.9)
             ax.set_title(f"{component_name} Waveform", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Amplitude", plot_params.grid_alpha)
             ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
+            _add_relative_seconds_axis(ax, utc_start)
         elif panel == "spectrogram":
             lo, hi = _robust_limits(spectrogram_db, 5, 98)
             t_axis = _to_x_axis_values(t_spec, utc_start)
@@ -464,9 +530,9 @@ def plot_merged_panels(
                 vmax=hi,
             )
             ax.set_title(f"{component_name} Spectrogram", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("Magnitude (dB)", fontname=plot_params.font_name)
         elif panel == "lofar":
@@ -482,9 +548,9 @@ def plot_merged_panels(
                 vmax=hi,
             )
             ax.set_title(f"{component_name} LOFAR", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("Normalized Power", fontname=plot_params.font_name)
         elif panel == "azimuth_mask":
@@ -499,9 +565,9 @@ def plot_merged_panels(
                 vmax=360,
             )
             ax.set_title(f"Azimuth (confidence >= {threshold:.2f})", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
         elif panel == "azimuth":
@@ -516,9 +582,9 @@ def plot_merged_panels(
                 vmax=360,
             )
             ax.set_title("Azimuth Spectrogram", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
         elif panel == "confidence":
@@ -536,9 +602,9 @@ def plot_merged_panels(
                 vmax=cmax,
             )
             ax.set_title("Confidence Map", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("Confidence", fontname=plot_params.font_name)
         elif panel == "azimuth_stability":
@@ -553,11 +619,41 @@ def plot_merged_panels(
                 vmax=1,
             )
             ax.set_title("Azimuth Stability (R)", fontname=plot_params.font_name)
-            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
             _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
-            _configure_utc_axis(ax, utc_start is not None)
+            _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
             cb = fig.colorbar(im, ax=ax, pad=0.01)
             cb.set_label("R", fontname=plot_params.font_name)
+        elif panel == "snr":
+            if snr_series_hyd is None:
+                ax.text(0.5, 0.5, "SNR unavailable", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title("HYD SNR Curve", fontname=plot_params.font_name)
+                xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
+                _style_axes(ax, plot_params.font_name, xlabel, "SNR (dB)", plot_params.grid_alpha)
+                _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
+            else:
+                t_axis = _to_x_axis_values(t_spec, utc_start)
+                y = np.asarray(snr_series_hyd, dtype=np.float64)
+                ax.plot(t_axis, y, color="tab:red", linewidth=max(plot_params.linewidth_waveform, 0.8))
+                if snr_noise_window_s is not None:
+                    w0 = float(snr_noise_window_s[0])
+                    w1 = float(snr_noise_window_s[1])
+                    if utc_start is not None:
+                        x0 = mdates.date2num(utc_start + dt.timedelta(seconds=w0))
+                        x1 = mdates.date2num(utc_start + dt.timedelta(seconds=w1))
+                    else:
+                        x0 = w0
+                        x1 = w1
+                    src = str(snr_noise_window_source or "unknown").lower()
+                    fill_color = "tab:orange" if src == "auto" else "tab:green"
+                    label = f"Noise Window ({src}) [{w0:.1f}s, {w1:.1f}s]"
+                    ax.axvspan(x0, x1, color=fill_color, alpha=0.22, label=label)
+                    ax.legend(loc="best", fontsize=8, framealpha=0.9)
+                ax.set_title("HYD SNR Curve", fontname=plot_params.font_name)
+                xlabel = _tz_label(plot_params.timezone_offset_hours) if utc_start is not None else "Time (s)"
+                _style_axes(ax, plot_params.font_name, xlabel, "SNR (dB)", plot_params.grid_alpha)
+                ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
+                _apply_local_time_axis(ax, utc_start, int(plot_params.timezone_offset_hours))
 
     for j in range(n, len(axes_arr)):
         axes_arr[j].axis("off")

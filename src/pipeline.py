@@ -48,6 +48,7 @@ class PipelineParams:
     snr_noise_window_s: Tuple[float, float] | None = None
     compute_snr: bool = False
     snr_auto_noise_window_s: float = 60.0
+    timezone_offset_hours: int = 8
 
 
 COMPONENTS = ("BH1", "BH2", "BHZ", "HYD")
@@ -228,6 +229,7 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
         "snr_noise_window_source": snr_payload["snr_noise_window_source"],
         "utc_start": utc_start,
         "utc_start_iso": utc_start.isoformat(),
+        "timezone_offset_hours": int(params.timezone_offset_hours),
     }
 
 
@@ -278,6 +280,7 @@ def run_pipeline(
     plot_cmap_confidence="magma",
     plot_linewidth_waveform=0.4,
     plot_grid_alpha=0.2,
+    timezone_offset_hours=8,
 ):
     """
     Read one event, run full processing, save result figures, and return output info.
@@ -303,6 +306,7 @@ def run_pipeline(
         "confidence": confidence_flag,
         "azimuth_stability": bool(plot_azimuth_stability),
     }
+    compute_snr_effective = bool(compute_snr) or bool(plot_flags["snr"])
     pipeline_kwargs = {
         "data_dir": data_dir,
         "window_length_s": float(window_length_s),
@@ -316,9 +320,10 @@ def run_pipeline(
         "stability_window": int(stability_window),
         "stability_step": int(stability_step),
         "confidence_threshold": float(confidence_threshold),
-        "compute_snr": bool(compute_snr),
+        "compute_snr": bool(compute_snr_effective),
         "snr_noise_window_s": snr_noise_window_s,
         "snr_auto_noise_window_s": float(snr_auto_noise_window_s),
+        "timezone_offset_hours": int(timezone_offset_hours),
     }
 
     bundles = list_events(data_dir)
@@ -341,6 +346,7 @@ def run_pipeline(
         freq_max=result["selected_band"][1],
         linewidth_waveform=float(plot_linewidth_waveform),
         grid_alpha=float(plot_grid_alpha),
+        timezone_offset_hours=int(timezone_offset_hours),
     )
     save_opts = SaveOptions(
         save=bool(save_plots),
@@ -363,10 +369,9 @@ def run_pipeline(
     selected_panels = [p for p in panel_order if plot_flags.get(p, False)]
 
     if bool(merge_all_plots):
-        merge_selected = [p for p in selected_panels if p != "snr"]
-        if merge_selected:
+        if selected_panels:
             fig, _ = plot_merged_panels_fn(
-                selected_panels=merge_selected,
+                selected_panels=selected_panels,
                 t_sec=result["t_sec"],
                 signal=result["signals"][component],
                 component_name=component,
@@ -382,6 +387,9 @@ def run_pipeline(
                 plot_params=plot_params,
                 normalize_waveform=bool(normalize_waveform),
                 utc_start=result["utc_start"],
+                snr_series_hyd=result.get("snr_series", {}).get("HYD"),
+                snr_noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+                snr_noise_window_source=result.get("snr_noise_window_source"),
             )
             if bool(save_plots):
                 event_clean = _clean_name(result["event_id"])
@@ -413,6 +421,9 @@ def run_pipeline(
                 save_opts,
                 normalize=bool(normalize_waveform),
                 utc_start=result["utc_start"],
+                noise_window_s=result.get("snr_windows", {}).get("noise_window_s"),
+                noise_window_source=result.get("snr_noise_window_source"),
+                show_noise_window=True,
             )
             plt.close(fig)
             module_component_pairs.append(("waveform", component))
@@ -528,10 +539,11 @@ def run_pipeline(
         f"window_length_s={window_length_s}",
         f"overlap={overlap}",
         f"orientation_deg={orientation_deg}",
-        f"compute_snr={compute_snr}",
+        f"compute_snr={compute_snr_effective}",
         f"snr_noise_window_s={snr_noise_window_s}",
         f"snr_noise_window_source={result['snr_noise_window_source']}",
         f"snr_hyd_db={result['snr_hyd_db']}",
+        f"timezone_offset_hours={int(timezone_offset_hours)}",
         f"saved_files={len(output_files)}",
     ]
 
