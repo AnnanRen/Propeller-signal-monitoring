@@ -299,3 +299,226 @@ def plot_azimuth_confidence_mask(
     fig.tight_layout()
     _save_figure(fig, "azimuth_confidence", "ALL", save_opts)
     return fig, axes
+
+
+def plot_azimuth_mask(
+    t_spec: np.ndarray,
+    f_hz: np.ndarray,
+    azimuth_masked_tf: np.ndarray,
+    threshold: float,
+    plot_params: PlotParams,
+    save_opts: SaveOptions,
+    utc_start: dt.datetime | None = None,
+):
+    fig, ax = plt.subplots(1, 1, figsize=plot_params.figsize, dpi=plot_params.dpi)
+    t_axis = _to_x_axis_values(t_spec, utc_start)
+    im = ax.imshow(
+        azimuth_masked_tf,
+        aspect="auto",
+        origin="lower",
+        extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+        cmap=plot_params.cmap_azi,
+        vmin=0,
+        vmax=360,
+    )
+    ax.set_title(f"Azimuth (confidence >= {threshold:.2f})", fontname=plot_params.font_name)
+    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+    _configure_utc_axis(ax, utc_start is not None)
+    cb = fig.colorbar(im, ax=ax, pad=0.01)
+    cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
+    fig.tight_layout()
+    _save_figure(fig, "azimuth_mask", "ALL", save_opts)
+    return fig, ax
+
+
+def plot_confidence_map(
+    t_spec: np.ndarray,
+    f_hz: np.ndarray,
+    confidence_tf: np.ndarray,
+    plot_params: PlotParams,
+    save_opts: SaveOptions,
+    utc_start: dt.datetime | None = None,
+):
+    fig, ax = plt.subplots(1, 1, figsize=plot_params.figsize, dpi=plot_params.dpi)
+    t_axis = _to_x_axis_values(t_spec, utc_start)
+    c_lo, c_hi = _robust_limits(confidence_tf, 1, 99)
+    cmin = min(0.0, c_lo)
+    cmax = max(1.0, c_hi)
+    im = ax.imshow(
+        confidence_tf,
+        aspect="auto",
+        origin="lower",
+        extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+        cmap=plot_params.cmap_confidence,
+        vmin=cmin,
+        vmax=cmax,
+    )
+    ax.set_title("Confidence Map", fontname=plot_params.font_name)
+    xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+    _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+    _configure_utc_axis(ax, utc_start is not None)
+    cb = fig.colorbar(im, ax=ax, pad=0.01)
+    cb.set_label("Confidence", fontname=plot_params.font_name)
+    fig.tight_layout()
+    _save_figure(fig, "confidence", "ALL", save_opts)
+    return fig, ax
+
+
+def plot_merged_panels(
+    selected_panels: list[str],
+    t_sec: np.ndarray,
+    signal: np.ndarray,
+    component_name: str,
+    t_spec: np.ndarray,
+    f_hz: np.ndarray,
+    spectrogram_db: np.ndarray,
+    lofar_map: np.ndarray,
+    azimuth_masked_tf: np.ndarray,
+    azimuth_deg_tf: np.ndarray,
+    confidence_tf: np.ndarray,
+    r_tf: np.ndarray,
+    threshold: float,
+    plot_params: PlotParams,
+    normalize_waveform: bool = True,
+    utc_start: dt.datetime | None = None,
+):
+    panels = [p for p in selected_panels if p != "snr"]
+    n = len(panels)
+    if n == 0:
+        raise ValueError("No panels selected for merged plotting.")
+
+    ncols = 1
+    nrows = n
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(plot_params.figsize[0] * ncols, plot_params.figsize[1] * nrows),
+        dpi=plot_params.dpi,
+    )
+    axes_arr = np.array(axes).reshape(-1)
+
+    for i, panel in enumerate(panels):
+        ax = axes_arr[i]
+        if panel == "waveform":
+            x = zscore_safe(signal) if normalize_waveform else signal
+            t_axis = _to_x_axis_values(t_sec, utc_start)
+            ax.plot(t_axis, x, color="tab:blue", linewidth=plot_params.linewidth_waveform)
+            ax.set_title(f"{component_name} Waveform", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Amplitude", plot_params.grid_alpha)
+            ax.set_xlim(float(np.min(t_axis)), float(np.max(t_axis)))
+            _configure_utc_axis(ax, utc_start is not None)
+        elif panel == "spectrogram":
+            lo, hi = _robust_limits(spectrogram_db, 5, 98)
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            im = ax.imshow(
+                spectrogram_db,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_spec,
+                vmin=lo,
+                vmax=hi,
+            )
+            ax.set_title(f"{component_name} Spectrogram", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("Magnitude (dB)", fontname=plot_params.font_name)
+        elif panel == "lofar":
+            lo, hi = _robust_limits(lofar_map, 2, 99)
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            im = ax.imshow(
+                lofar_map,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_lofar,
+                vmin=lo,
+                vmax=hi,
+            )
+            ax.set_title(f"{component_name} LOFAR", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("Normalized Power", fontname=plot_params.font_name)
+        elif panel == "azimuth_mask":
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            im = ax.imshow(
+                azimuth_masked_tf,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_azi,
+                vmin=0,
+                vmax=360,
+            )
+            ax.set_title(f"Azimuth (confidence >= {threshold:.2f})", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
+        elif panel == "azimuth":
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            im = ax.imshow(
+                azimuth_deg_tf,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_azi,
+                vmin=0,
+                vmax=360,
+            )
+            ax.set_title("Azimuth Spectrogram", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("Azimuth (deg)", fontname=plot_params.font_name)
+        elif panel == "confidence":
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            c_lo, c_hi = _robust_limits(confidence_tf, 1, 99)
+            cmin = min(0.0, c_lo)
+            cmax = max(1.0, c_hi)
+            im = ax.imshow(
+                confidence_tf,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_confidence,
+                vmin=cmin,
+                vmax=cmax,
+            )
+            ax.set_title("Confidence Map", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("Confidence", fontname=plot_params.font_name)
+        elif panel == "azimuth_stability":
+            t_axis = _to_x_axis_values(t_spec, utc_start)
+            im = ax.imshow(
+                r_tf,
+                aspect="auto",
+                origin="lower",
+                extent=[float(np.min(t_axis)), float(np.max(t_axis)), float(np.min(f_hz)), float(np.max(f_hz))],
+                cmap=plot_params.cmap_stability,
+                vmin=0,
+                vmax=1,
+            )
+            ax.set_title("Azimuth Stability (R)", fontname=plot_params.font_name)
+            xlabel = "UTC Time" if utc_start is not None else "Time (s)"
+            _style_axes(ax, plot_params.font_name, xlabel, "Frequency (Hz)", plot_params.grid_alpha)
+            _configure_utc_axis(ax, utc_start is not None)
+            cb = fig.colorbar(im, ax=ax, pad=0.01)
+            cb.set_label("R", fontname=plot_params.font_name)
+
+    for j in range(n, len(axes_arr)):
+        axes_arr[j].axis("off")
+
+    fig.tight_layout()
+    return fig, axes_arr

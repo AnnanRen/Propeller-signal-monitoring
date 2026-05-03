@@ -15,10 +15,12 @@ from .data_io import SACBundle, find_sac_bundles, load_bundle
 from .plotting import (
     PlotParams,
     SaveOptions,
-    plot_azimuth_confidence_mask as plot_azimuth_confidence_mask_fn,
+    plot_azimuth_mask as plot_azimuth_mask_fn,
     plot_azimuth_spectrogram as plot_azimuth_spectrogram_fn,
     plot_azimuth_stability as plot_azimuth_stability_fn,
+    plot_confidence_map as plot_confidence_map_fn,
     plot_lofar as plot_lofar_fn,
+    plot_merged_panels as plot_merged_panels_fn,
     plot_spectrogram as plot_spectrogram_fn,
     plot_waveform as plot_waveform_fn,
 )
@@ -222,7 +224,10 @@ def run_pipeline(
     plot_lofar=True,
     plot_azimuth=True,
     plot_azimuth_stability=True,
-    plot_azimuth_confidence=True,
+    plot_azimuth_mask=True,
+    plot_confidence=True,
+    plot_azimuth_confidence=None,
+    merge_all_plots=True,
     normalize_waveform=True,
     plot_font_name="Helvetica",
     plot_dpi=300,
@@ -249,13 +254,16 @@ def run_pipeline(
     if component not in COMPONENTS:
         raise ValueError(f"component must be one of {COMPONENTS}, got: {component}")
 
+    confidence_flag = bool(plot_confidence) if plot_azimuth_confidence is None else bool(plot_azimuth_confidence)
     plot_flags = {
         "waveform": bool(plot_waveform),
         "spectrogram": bool(plot_spectrogram),
         "lofar": bool(plot_lofar),
+        "snr": False,
+        "azimuth_mask": bool(plot_azimuth_mask),
         "azimuth": bool(plot_azimuth),
+        "confidence": confidence_flag,
         "azimuth_stability": bool(plot_azimuth_stability),
-        "azimuth_confidence": bool(plot_azimuth_confidence),
     }
     pipeline_kwargs = {
         "data_dir": data_dir,
@@ -301,90 +309,144 @@ def run_pipeline(
     )
 
     module_component_pairs = []
-    if plot_flags["waveform"]:
-        fig, _ = plot_waveform_fn(
-            result["t_sec"],
-            result["signals"][component],
-            component,
-            plot_params,
-            save_opts,
-            normalize=bool(normalize_waveform),
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("waveform", component))
+    panel_order = [
+        "waveform",
+        "snr",
+        "spectrogram",
+        "lofar",
+        "azimuth_mask",
+        "azimuth",
+        "confidence",
+        "azimuth_stability",
+    ]
+    selected_panels = [p for p in panel_order if plot_flags.get(p, False)]
 
-    if plot_flags["spectrogram"]:
-        fig, _ = plot_spectrogram_fn(
-            result["t_spec"],
-            result["f_hz"],
-            result["spectrogram_db"][component],
-            component,
-            plot_params,
-            save_opts,
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("spectrogram", component))
+    if bool(merge_all_plots):
+        merge_selected = [p for p in selected_panels if p != "snr"]
+        if merge_selected:
+            fig, _ = plot_merged_panels_fn(
+                selected_panels=merge_selected,
+                t_sec=result["t_sec"],
+                signal=result["signals"][component],
+                component_name=component,
+                t_spec=result["t_spec"],
+                f_hz=result["f_hz"],
+                spectrogram_db=result["spectrogram_db"][component],
+                lofar_map=result["lofar"][component],
+                azimuth_masked_tf=result["azimuth_masked"],
+                azimuth_deg_tf=result["azimuth_deg"],
+                confidence_tf=result["confidence"],
+                r_tf=result["azimuth_stability"],
+                threshold=float(confidence_threshold),
+                plot_params=plot_params,
+                normalize_waveform=bool(normalize_waveform),
+                utc_start=result["utc_start"],
+            )
+            if bool(save_plots):
+                event_clean = _clean_name(result["event_id"])
+                for fmt in formats:
+                    fig.savefig(output_dir / f"{event_clean}_all.{fmt}", dpi=fig.dpi, bbox_inches="tight", facecolor="white")
+            plt.close(fig)
+            module_component_pairs.append(("all", ""))
+    else:
+        if plot_flags["waveform"]:
+            fig, _ = plot_waveform_fn(
+                result["t_sec"],
+                result["signals"][component],
+                component,
+                plot_params,
+                save_opts,
+                normalize=bool(normalize_waveform),
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("waveform", component))
 
-    if plot_flags["lofar"]:
-        fig, _ = plot_lofar_fn(
-            result["t_spec"],
-            result["f_hz"],
-            result["lofar"][component],
-            component,
-            plot_params,
-            save_opts,
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("lofar", component))
+        if plot_flags["spectrogram"]:
+            fig, _ = plot_spectrogram_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["spectrogram_db"][component],
+                component,
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("spectrogram", component))
 
-    if plot_flags["azimuth"]:
-        fig, _ = plot_azimuth_spectrogram_fn(
-            result["t_spec"],
-            result["f_hz"],
-            result["azimuth_deg"],
-            plot_params,
-            save_opts,
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("azimuth", "ALL"))
+        if plot_flags["lofar"]:
+            fig, _ = plot_lofar_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["lofar"][component],
+                component,
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("lofar", component))
 
-    if plot_flags["azimuth_stability"]:
-        fig, _ = plot_azimuth_stability_fn(
-            result["t_spec"],
-            result["f_hz"],
-            result["azimuth_stability"],
-            plot_params,
-            save_opts,
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("azimuth_stability", "ALL"))
+        if plot_flags["azimuth_mask"]:
+            fig, _ = plot_azimuth_mask_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["azimuth_masked"],
+                threshold=float(confidence_threshold),
+                plot_params=plot_params,
+                save_opts=save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("azimuth_mask", "ALL"))
 
-    if plot_flags["azimuth_confidence"]:
-        fig, _ = plot_azimuth_confidence_mask_fn(
-            result["t_spec"],
-            result["f_hz"],
-            result["azimuth_masked"],
-            result["confidence"],
-            threshold=float(confidence_threshold),
-            plot_params=plot_params,
-            save_opts=save_opts,
-            utc_start=result["utc_start"],
-        )
-        plt.close(fig)
-        module_component_pairs.append(("azimuth_confidence", "ALL"))
+        if plot_flags["azimuth"]:
+            fig, _ = plot_azimuth_spectrogram_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["azimuth_deg"],
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("azimuth", "ALL"))
+
+        if plot_flags["confidence"]:
+            fig, _ = plot_confidence_map_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["confidence"],
+                plot_params=plot_params,
+                save_opts=save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("confidence", "ALL"))
+
+        if plot_flags["azimuth_stability"]:
+            fig, _ = plot_azimuth_stability_fn(
+                result["t_spec"],
+                result["f_hz"],
+                result["azimuth_stability"],
+                plot_params,
+                save_opts,
+                utc_start=result["utc_start"],
+            )
+            plt.close(fig)
+            module_component_pairs.append(("azimuth_stability", "ALL"))
 
     output_files = []
     event_clean = _clean_name(result["event_id"])
     for module_name, comp_name in module_component_pairs:
-        module_clean = _clean_name(module_name)
-        comp_clean = _clean_name(comp_name)
         for fmt in formats:
-            fp = output_dir / f"{event_clean}_{module_clean}_{comp_clean}.{fmt}"
+            if module_name == "all":
+                fp = output_dir / f"{event_clean}_all.{fmt}"
+            else:
+                module_clean = _clean_name(module_name)
+                comp_clean = _clean_name(comp_name)
+                fp = output_dir / f"{event_clean}_{module_clean}_{comp_clean}.{fmt}"
             if fp.exists():
                 output_files.append(fp)
 
