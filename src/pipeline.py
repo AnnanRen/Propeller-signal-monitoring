@@ -36,8 +36,6 @@ class PipelineParams:
     time_slice_s: Tuple[float, float] | None = None
     enable_demean: bool = True
     enable_detrend: bool = True
-    enable_bandpass: bool = True
-    preprocess_band: Tuple[float, float] | None = None
     apply_orientation: bool = True
     orientation_deg: float = 0.0
     stability_window: int = 15
@@ -115,8 +113,6 @@ def process_event(bundle: SACBundle, params: PipelineParams) -> Dict[str, object
         fs=fs,
         enable_demean=params.enable_demean,
         enable_detrend=params.enable_detrend,
-        enable_bandpass=params.enable_bandpass,
-        preprocess_band=params.preprocess_band,
         apply_orientation=params.apply_orientation,
         orientation_deg=params.orientation_deg,
     )
@@ -214,8 +210,6 @@ def run_pipeline(
     overlap=0.5,
     enable_demean=True,
     enable_detrend=True,
-    enable_bandpass=True,
-    preprocess_band=None,
     apply_orientation=True,
     orientation_deg=0.0,
     stability_window=15,
@@ -271,8 +265,6 @@ def run_pipeline(
         "time_slice_s": time_slice_s,
         "enable_demean": bool(enable_demean),
         "enable_detrend": bool(enable_detrend),
-        "enable_bandpass": bool(enable_bandpass),
-        "preprocess_band": preprocess_band,
         "apply_orientation": bool(apply_orientation),
         "orientation_deg": float(orientation_deg),
         "stability_window": int(stability_window),
@@ -404,7 +396,6 @@ def run_pipeline(
         f"time_slice_s={time_slice_s}",
         f"window_length_s={window_length_s}",
         f"overlap={overlap}",
-        f"preprocess_band={preprocess_band}",
         f"orientation_deg={orientation_deg}",
         f"saved_files={len(output_files)}",
     ]

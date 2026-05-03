@@ -84,26 +84,11 @@ def main() -> None:
     input_path = manual_input.strip() if manual_input.strip() else event_id
 
     st.subheader("预处理参数")
-    p1, p2, p3 = st.columns(3)
+    p1, p2 = st.columns(2)
     with p1:
         enable_demean = st.checkbox("去均值", value=True)
     with p2:
         enable_detrend = st.checkbox("去趋势", value=True)
-    with p3:
-        enable_bandpass = st.checkbox("带通滤波", value=True)
-
-    use_custom_pre_band = st.checkbox("自定义预处理带通频段", value=False)
-    preprocess_band = None
-    if use_custom_pre_band:
-        pb1, pb2 = st.columns(2)
-        with pb1:
-            pre_band_min = st.number_input("预处理频段最小值 (Hz)", min_value=0.01, value=2.0, step=0.1)
-        with pb2:
-            pre_band_max = st.number_input("预处理频段最大值 (Hz)", min_value=0.02, value=200.0, step=0.1)
-        if pre_band_max <= pre_band_min:
-            st.error("预处理频段最大值必须大于最小值。")
-            return
-        preprocess_band = (float(pre_band_min), float(pre_band_max))
 
     o1, o2 = st.columns(2)
     with o1:
@@ -222,8 +207,6 @@ def main() -> None:
                 overlap=float(overlap),
                 enable_demean=bool(enable_demean),
                 enable_detrend=bool(enable_detrend),
-                enable_bandpass=bool(enable_bandpass),
-                preprocess_band=preprocess_band,
                 apply_orientation=bool(apply_orientation),
                 orientation_deg=float(orientation_deg),
                 stability_window=int(stability_window),
