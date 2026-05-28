@@ -2,7 +2,13 @@
 
 > 基于声压-水平分量互谱的船舶噪声方位反演与时频分析系统，用于从四分量海底地震仪（Ocean Bottom Seismometer, OBS）数据中自动识别、评估和可视化船舶噪声信号。
 
+<p align="right">
+  <a href="#english-version">🇺🇸 English</a>
+</p>
+
 ---
+
+<span id="中文"></span>
 
 ## 科学背景
 
@@ -222,6 +228,10 @@ MIT License
 ---
 
 # English Version
+
+<p align="right">
+  <a href="#中文">🇨🇳 中文</a>
+</p>
 
 > A 4-component OBS ship-noise automatic identification system. Acoustic-pressure / horizontal-component cross-spectral azimuth inversion combined with time-frequency analysis for detecting, assessing, and visualizing ship radiated noise in Ocean Bottom Seismometer data.
 
